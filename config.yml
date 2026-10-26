@@ -1,0 +1,22 @@
+
+dir_flag: "results_raw"
+run_dir: "/rds/project/rds-O11U8YqSuCk/bioinformatics/pipelines/pipeline-scrnaseq-sm"
+filepaths: "inputs/filepaths.csv"
+metadata: "inputs/metadata.csv"
+multiqc_mode: "interactive"      # interactive | flat
+#exclude: "SITTA5,SITTB5"        # optional, comma-separated samples to skip
+
+# Cell Ranger (not on conda - full path to the 10x install)
+cellranger_bin: "/rds/project/rds-O11U8YqSuCk/bioinformatics/tools/cellranger-10.1.0/cellranger"
+cellranger_ref: "/rds/project/rds-O11U8YqSuCk/bioinformatics/genome/index/cellranger/ensembl/mus_musculus/release-113/mus_musculus_GRCm39_113"
+cellranger_chemistry: "auto"     # auto | SC3Pv3 | SC3Pv4 | SC5P-R2 | ...
+cellranger_create_bam: true      # BAM needed for velocity / genotype demultiplexing; false saves space
+cellranger_include_introns: true # Cell Ranger default; keep true for single-nucleus
+cellranger_expect_cells: ""      # optional integer, empty = auto
+
+# QC plot grouping
+cellranger_check_cat: "Sample sex"   # metadata column to group Cell Ranger metric plots by (empty = no grouping)
+expected_cells: ""                   # plot only: dashed line on Estimated Number of Cells (empty = no line); does not change Cell Ranger
+
+# Gene annotation (mouse, Ensembl 113 - same release as cellranger_ref)
+annotation: "/rds/project/rds-O11U8YqSuCk/bioinformatics/genome/ensembl/mus_musculus/release-113/gene_annotation.tsv"   # ensembl_gene_id + gene_symbol, for sex_check
