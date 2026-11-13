@@ -15,6 +15,7 @@ cellranger_include_introns: true # Cell Ranger default; keep true for single-nuc
 cellranger_expect_cells: ""      # optional integer, empty = auto
 
 # QC plot grouping
+qc_check_cat: "Condition 1,Batch,Sample sex"   # metadata columns for the FastQC plots (comma-separated, one figure each)
 cellranger_check_cat: "Sample sex"   # metadata column to group Cell Ranger metric plots by (empty = no grouping)
 expected_cells: ""                   # plot only: dashed line on Estimated Number of Cells (empty = no line); does not change Cell Ranger
 

@@ -9,6 +9,7 @@ Single-cell RNA-seq (10x Genomics) pipeline in Snakemake, built the same way as 
 |---|------|------|-----|----------|
 | 1 | `fastqc` | FastQC | `pipeline-bulkrnaseq-sm_env` | `fastq-raw/{sample}.r_{1,2}_fastqc.{html,zip}` |
 | 2 | `multiqc` | MultiQC | `pipeline-bulkrnaseq-sm_env` | `multiqc-raw/multiqc_report.html` |
+| 2b | `qc_check` | R (`plot_barplot_qc.R`) | `dge_env` | `qc_check/`: FastQC metrics per sample (lanes combined) + one barplot figure per metadata column in `qc_check_cat`; per-lane table + figure by sequencing run and lane; group comparison of read pairs and R2 % GC |
 | 3 | `cellranger_count` | Cell Ranger 10.1.0 | none (full path in `cellranger_bin`) | `cellranger/{sample}/outs/` |
 | 4 | `cellranger_check` | Python (`plot_cellranger_metrics.py`) | `pipeline-bulkrnaseq-sm_env` | `cellranger_check/`: merged metrics table + per-sample QC barplots, grouped by `cellranger_check_cat` |
 | 5 | `merge_counts` | Python (`make_pseudobulk.py`) | `pipeline-bulkrnaseq-sm_env` | `merged-counts/merged_counts.csv`: pseudobulk (UMIs summed over cells) gene x sample, same layout as bulk; `n_cells.csv` |
@@ -27,9 +28,12 @@ Reference: Ensembl GRCm39 release 113 (`genome/index/cellranger/ensembl/mus_musc
 
 ## Inputs
 
-- `inputs/filepaths.csv` — `sample,fastq_1,fastq_2`, **one row per sample** (paths relative to `run_dir`).
+- `inputs/filepaths.csv` — `sample,fastq_1,fastq_2`, **one row per FASTQ pair** (paths relative to `run_dir`).
+  A sample sequenced on several lanes / flowcells / runs has several rows: FastQC runs per pair
+  (`fastq-raw/<sample>_L001.r_1_fastqc.*`, `_L002`, ...; just `<sample>.r_1_fastqc.*` if the sample has one pair),
+  and all pairs of a sample go into **one** `cellranger count` (linked as lanes L001, L002, ...). No lane merging needed.
   R1 = barcode + UMI read, R2 = cDNA read. Sample names: letters, digits, `-`, `_` only.
-  Generate with `bash prerun_filepaths.sh` (`./raw_data` → `./inputs/filepaths.csv`).
+  Generate with `scripts/utils-generate_filepaths.sh <raw_data> <inputs_dir> filepaths.csv`, run from `run_dir`.
 - `inputs/metadata.csv` — same format as bulk (`Barcode` column = sample names). Not used by these three steps; kept for downstream analysis.
 
 `raw_data` is a symlink to `../pipeline-scrnaseq-sm_old/raw_data`.
@@ -71,6 +75,7 @@ snakemake -s Snakefile -n --cores 96 --configfile config.yml \
 | `cellranger_create_bam` | `true` / `false` |
 | `cellranger_include_introns` | `true` (default) / `false` |
 | `cellranger_expect_cells` | Optional integer, empty = auto |
+| `qc_check_cat` | Comma-separated metadata columns for the FastQC plots, e.g. `Condition 1,Batch,Sample sex` (one figure each; empty = table only) |
 | `cellranger_check_cat` | Metadata column to group the Cell Ranger QC plots by (e.g. `Sample sex`; empty = no grouping) |
 | `annotation` | Gene annotation TSV (`ensembl_gene_id`, `gene_symbol`), same Ensembl release as `cellranger_ref`; used by `sex_check` |
 | `expected_cells` | Plot only: dashed line at this value on "Estimated Number of Cells" (empty = no line). Does not change Cell Ranger (use `cellranger_expect_cells` for that) |
@@ -81,8 +86,14 @@ snakemake -s Snakefile -n --cores 96 --configfile config.yml \
 results_raw/
 ├── fastq-raw/                     # FastQC per sample
 ├── multiqc-raw/multiqc_report.html
+├── qc_check/
+│   ├── qc_metrics.csv             # one row per sample: metadata + FastQC metrics (lanes combined)
+│   ├── barplot_qc_<column>.png    # one figure per column in qc_check_cat
+│   ├── qc_metrics_per_lane.csv    # one row per FASTQ pair: sequencing run, lane + FastQC metrics
+│   ├── barplot_qc_run_lane.png    # per-lane values by run + lane (run = hue, lane = shade), with the qc_check_cat groups beside each sample
+│   └── stripplot_qc_groups.png    # read pairs and R2 % GC across each qc_check_cat column
 ├── cellranger/
-│   ├── fastq/<sample>/            # symlinks named <sample>_S1_L001_R{1,2}_001.fastq.gz for Cell Ranger
+│   ├── fastq/<sample>/            # symlinks <sample>_S1_L00N_R{1,2}_001.fastq.gz (one lane per FASTQ pair) for Cell Ranger
 │   └── <sample>/outs/             # web_summary.html, metrics_summary.csv, *_feature_bc_matrix(.h5), BAM, cloupe
 ├── merged-counts/
 │   ├── merged_counts.csv          # pseudobulk counts: gene_id x sample (UMIs summed over all cells)

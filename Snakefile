@@ -31,6 +31,8 @@ if filepaths is None:
     )
 filepaths = os.path.join(RUN_DIR, filepaths)
 
+# filepaths.csv: sample,fastq_1,fastq_2 - one row per FASTQ pair.
+# A sample sequenced on several lanes / runs has several rows; all its pairs go into one `cellranger count`.
 samples = {}
 with open(filepaths) as f:
     header = f.readline()
@@ -50,14 +52,21 @@ with open(filepaths) as f:
         if not re.match(r"^[A-Za-z0-9_-]+$", sample):
             raise ValueError(f"Sample name '{sample}' is not valid for Cell Ranger (allowed: letters, digits, '-', '_').")
 
-        if sample in samples:
-            raise ValueError(f"Sample '{sample}' appears more than once in {filepaths}. Use one row (one R1/R2 pair) per sample - merge lanes first.")
-
         fq1 = os.path.join(RUN_DIR, parts[1])
         fq2 = os.path.join(RUN_DIR, parts[2])
-        samples[sample] = {"r1": fq1, "r2": fq2}
+        if any(p["r1"] == fq1 for p in samples.get(sample, [])):
+            raise ValueError(f"Duplicate row for sample '{sample}' in {filepaths}: {parts[1]}")
+        samples.setdefault(sample, []).append({"r1": fq1, "r2": fq2})
 
-print("[INFO] Samples:", ", ".join(samples))
+# One FastQC "unit" per FASTQ pair: <sample> if the sample has one pair, else <sample>_L001, <sample>_L002, ...
+units = {}
+for sample, pairs in samples.items():
+    for i, pair in enumerate(pairs, start=1):
+        unit = sample if len(pairs) == 1 else f"{sample}_L{i:03d}"
+        units[unit] = pair
+
+print("[INFO] Samples:", ", ".join(f"{s} ({len(p)})" if len(p) > 1 else s for s, p in samples.items()))
+print(f"[INFO] {len(samples)} samples, {len(units)} FASTQ pairs")
 
 metadata = os.path.join(RUN_DIR, config["metadata"])
 # -----------------------------
@@ -68,6 +77,7 @@ DIR_FLAG = config["dir_flag"]
 
 fastqc_dir        = os.path.join(RUN_DIR, DIR_FLAG, "fastq-raw")
 multiqc_dir       = os.path.join(RUN_DIR, DIR_FLAG, "multiqc-raw")
+qc_check_dir      = os.path.join(RUN_DIR, DIR_FLAG, "qc_check")
 cellranger_dir    = os.path.join(RUN_DIR, DIR_FLAG, "cellranger")
 cellranger_check_dir = os.path.join(RUN_DIR, DIR_FLAG, "cellranger_check")
 merged_counts_dir = os.path.join(RUN_DIR, DIR_FLAG, "merged-counts")
@@ -89,6 +99,11 @@ cellranger_expect_cells = config.get("cellranger_expect_cells", "") or ""
 cellranger_check_cat    = config.get("cellranger_check_cat", "") or ""   # metadata column to group plots by
 expected_cells          = config.get("expected_cells", "") or ""         # plot only: dashed line on Estimated Number of Cells
 annotation              = config["annotation"]                           # gene annotation TSV (ensembl_gene_id, gene_symbol)
+qc_check_cat            = [x.strip() for x in (config.get("qc_check_cat", "") or "").split(",") if x.strip()]   # metadata columns for the FastQC plots
+
+wildcard_constraints:
+    sample="|".join(re.escape(s) for s in samples),
+    unit="|".join(re.escape(u) for u in units)
 
 
 # -----------------------------
@@ -96,14 +111,21 @@ annotation              = config["annotation"]                           # gene 
 # -----------------------------
 rule all:
     input:
-        # FastQC raw
-        expand(os.path.join(fastqc_dir, "{sample}.r_1_fastqc.html"), sample=samples.keys()),
-        expand(os.path.join(fastqc_dir, "{sample}.r_1_fastqc.zip"), sample=samples.keys()),
-        expand(os.path.join(fastqc_dir, "{sample}.r_2_fastqc.html"), sample=samples.keys()),
-        expand(os.path.join(fastqc_dir, "{sample}.r_2_fastqc.zip"), sample=samples.keys()),
+        # FastQC raw (one per FASTQ pair)
+        expand(os.path.join(fastqc_dir, "{unit}.r_1_fastqc.html"), unit=units.keys()),
+        expand(os.path.join(fastqc_dir, "{unit}.r_1_fastqc.zip"), unit=units.keys()),
+        expand(os.path.join(fastqc_dir, "{unit}.r_2_fastqc.html"), unit=units.keys()),
+        expand(os.path.join(fastqc_dir, "{unit}.r_2_fastqc.zip"), unit=units.keys()),
 
         # MultiQC raw
         os.path.join(multiqc_dir, "multiqc_report.html"),
+
+        # QC check
+        os.path.join(qc_check_dir, "qc_metrics.csv"),
+        expand(os.path.join(qc_check_dir, "barplot_qc_{col_cat}.png"), col_cat=[c.replace(" ", "_") for c in qc_check_cat]),
+        os.path.join(qc_check_dir, "qc_metrics_per_lane.csv"),
+        os.path.join(qc_check_dir, "barplot_qc_run_lane.png"),
+        [os.path.join(qc_check_dir, "stripplot_qc_groups.png")] if qc_check_cat else [],
 
         # Cell Ranger
         expand(os.path.join(cellranger_dir, "{sample}", "outs", "web_summary.html"), sample=samples.keys()),
@@ -126,13 +148,13 @@ rule all:
 # -----------------------------
 rule fastqc:
     input:
-        r1=lambda wc: samples[wc.sample]["r1"],
-        r2=lambda wc: samples[wc.sample]["r2"]
+        r1=lambda wc: units[wc.unit]["r1"],
+        r2=lambda wc: units[wc.unit]["r2"]
     output:
-        r1_html=os.path.join(fastqc_dir, "{sample}.r_1_fastqc.html"),
-        r1_zip=os.path.join(fastqc_dir, "{sample}.r_1_fastqc.zip"),
-        r2_html=os.path.join(fastqc_dir, "{sample}.r_2_fastqc.html"),
-        r2_zip=os.path.join(fastqc_dir, "{sample}.r_2_fastqc.zip")
+        r1_html=os.path.join(fastqc_dir, "{unit}.r_1_fastqc.html"),
+        r1_zip=os.path.join(fastqc_dir, "{unit}.r_1_fastqc.zip"),
+        r2_html=os.path.join(fastqc_dir, "{unit}.r_2_fastqc.html"),
+        r2_zip=os.path.join(fastqc_dir, "{unit}.r_2_fastqc.zip")
     threads:
         fastqc_threads,
     conda:
@@ -158,8 +180,8 @@ rule fastqc:
 # -----------------------------
 rule multiqc:
     input:
-        expand(os.path.join(fastqc_dir, "{sample}.r_1_fastqc.zip"), sample=samples.keys()) +
-        expand(os.path.join(fastqc_dir, "{sample}.r_2_fastqc.zip"), sample=samples.keys())
+        expand(os.path.join(fastqc_dir, "{unit}.r_1_fastqc.zip"), unit=units.keys()) +
+        expand(os.path.join(fastqc_dir, "{unit}.r_2_fastqc.zip"), unit=units.keys())
     output:
         os.path.join(multiqc_dir, "multiqc_report.html")
     conda:
@@ -171,14 +193,47 @@ rule multiqc:
         """
 
 # -----------------------------
+# QC check
+# -----------------------------
+# FastQC metrics per sample (lanes combined), one figure per metadata column in qc_check_cat,
+# plus a per-lane figure by sequencing run + lane and a comparison across the qc_check_cat groups.
+rule qc_check:
+    input:
+        multiqc_report=os.path.join(multiqc_dir, "multiqc_report.html"),
+        filepaths=filepaths,
+        metadata=metadata
+    output:
+        table=os.path.join(qc_check_dir, "qc_metrics.csv"),
+        plots=expand(os.path.join(qc_check_dir, "barplot_qc_{col_cat}.png"), col_cat=[c.replace(" ", "_") for c in qc_check_cat]),
+        lane_table=os.path.join(qc_check_dir, "qc_metrics_per_lane.csv"),
+        run_lane_plot=os.path.join(qc_check_dir, "barplot_qc_run_lane.png"),
+        groups_plot=[os.path.join(qc_check_dir, "stripplot_qc_groups.png")] if qc_check_cat else []
+    params:
+        qc_check_cat=",".join(qc_check_cat)
+    conda:
+        "dge_env"
+    shell:
+        """
+        mkdir -p {qc_check_dir}
+
+        Rscript {SCRIPTS_DIR}/plot_barplot_qc.R \
+            --multiqc_dir "{multiqc_dir}/multiqc_report_data" \
+            --filepaths "{input.filepaths}" \
+            --metadata "{input.metadata}" \
+            --group_cols "{params.qc_check_cat}" \
+            --outdir "{qc_check_dir}"
+        """
+
+# -----------------------------
 # Cell Ranger count
 # -----------------------------
 # Waits on the raw MultiQC report (QC gate, as trim_reads in pipeline-bulkrnaseq-sm).
 # Cell Ranger is not on conda: cellranger_bin is the full path to the 10x install.
+# All FASTQ pairs of a sample are passed together (as lanes L001, L002, ...).
 rule cellranger_count:
     input:
-        r1=lambda wc: samples[wc.sample]["r1"],
-        r2=lambda wc: samples[wc.sample]["r2"],
+        r1=lambda wc: [p["r1"] for p in samples[wc.sample]],
+        r2=lambda wc: [p["r2"] for p in samples[wc.sample]],
         multiqc_report=os.path.join(multiqc_dir, "multiqc_report.html")
     output:
         web=os.path.join(cellranger_dir, "{sample}", "outs", "web_summary.html"),
@@ -189,10 +244,13 @@ rule cellranger_count:
         cellranger_threads,
     resources:
         mem_mb=cellranger_mem * 1024
+    params:
+        r1=lambda wc: ",".join(p["r1"] for p in samples[wc.sample]),
+        r2=lambda wc: ",".join(p["r2"] for p in samples[wc.sample])
     shell:
         """
         mkdir -p {cellranger_dir}
-        bash {SCRIPTS_DIR}/run_cellranger.sh {cellranger_bin} {wildcards.sample} {input.r1} {input.r2} {cellranger_ref} {cellranger_dir} {threads} {cellranger_mem} {cellranger_chemistry} {cellranger_create_bam} {cellranger_introns} "{cellranger_expect_cells}"
+        bash {SCRIPTS_DIR}/run_cellranger.sh {cellranger_bin} {wildcards.sample} "{params.r1}" "{params.r2}" {cellranger_ref} {cellranger_dir} {threads} {cellranger_mem} {cellranger_chemistry} {cellranger_create_bam} {cellranger_introns} "{cellranger_expect_cells}"
         """
 
 # -----------------------------
