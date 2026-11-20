@@ -3,6 +3,22 @@ channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python=3.10
+  - python=3.11
   - fastqc=0.12.1
   - multiqc=1.30
+  # downstream single-cell analysis (sc_* rules)
+  - scanpy=1.11.5
+  - anndata=0.11.4
+  - harmonypy=0.0.10
+  - leidenalg=0.10.2
+  - python-igraph=0.11.8
+  - scikit-learn=1.7.2
+  - scikit-image=0.25.2           # Scrublet automatic doublet threshold
+  - umap-learn=0.5.9.post2
+  - pynndescent=0.5.13
+  - numpy=2.2.6
+  - scipy=1.15.2
+  - pandas=2.3.3
+  - h5py=3.15.1
+  - matplotlib=3.10.8
+  - seaborn=0.13.2

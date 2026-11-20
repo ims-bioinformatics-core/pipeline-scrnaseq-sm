@@ -1,0 +1,13 @@
+Pool ,Barcode,Sequence,Sample name,Condition 1, Condition 2,Batch,Sample type,Sample age,Sample sex
+SLX-11111,SITTA5,,W1,treated,obese,1,tissue,adult,M
+SLX-11111,SITTB5,,W2,untreated,obese,1,tissue,adult,F
+SLX-11111,SITTC5,,W3,treated,obese,1,tissue,adult,M
+SLX-11111,SITTD5,,W4,untreated,obese,1,tissue,adult,F
+SLX-11111,SITTE5,,W5,treated,obese,1,tissue,adult,M
+SLX-11111,SITTE6,,W6,untreated,obese,1,tissue,adult,F
+SLX-11111,SITTF5,,W7,treated,obese,1,tissue,adult,M
+SLX-11111,SITTF6,,W8,untreated,obese,1,tissue,adult,F
+SLX-11111,SITTG5,,W9,treated,obese,1,tissue,adult,M
+SLX-11111,SITTG6,,W10,untreated,obese,1,tissue,adult,F
+SLX-11111,SITTH5,,W11,treated,obese,1,tissue,adult,M
+SLX-11111,SITTH6,,W12,untreated,obese,1,tissue,adult,F

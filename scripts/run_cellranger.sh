@@ -38,8 +38,15 @@ done
 # --- Prepare output directory ---
 # Snakemake pre-creates <sample>/outs/ for the declared outputs, and Cell Ranger refuses
 # to write into a directory that is not one of its own pipestances -> start clean.
+# A pipestance left by an interrupted run (e.g. job killed at the time limit) has _invocation:
+# Cell Ranger resumes it from the last finished stage once the stale _lock is removed.
 cd "$OUT_DIR"
-rm -rf "$OUT_DIR/$SAMPLE"
+if [ -f "$OUT_DIR/$SAMPLE/_invocation" ]; then
+    echo "♻️  Resuming interrupted Cell Ranger run in $OUT_DIR/$SAMPLE"
+    rm -f "$OUT_DIR/$SAMPLE/_lock"
+else
+    rm -rf "$OUT_DIR/$SAMPLE"
+fi
 
 OPTIONAL_ARGS=()
 [[ -n "$EXPECT_CELLS" ]] && OPTIONAL_ARGS+=(--expect-cells="$EXPECT_CELLS")

@@ -1,0 +1,12 @@
+cell_type,genes
+Excitatory_neurons,Slc17a7;Satb2;Neurod6;Nrgn
+Inhibitory_neurons,Gad1;Gad2;Slc32a1
+Astrocytes,Aqp4;Gja1;Slc1a2;Aldh1l1;Gfap
+Oligodendrocytes,Mog;Plp1;Mbp;St18
+OPC,Pdgfra;Cspg4;Vcan
+Microglia,Cx3cr1;P2ry12;Csf1r;Hexb
+BAM,Mrc1;Lyve1;F13a1;Cd163
+Endothelial,Cldn5;Flt1;Pecam1;Slco1a4
+Pericytes,Pdgfrb;Kcnj8;Abcc9;Vtn
+SMC,Acta2;Myh11;Tagln
+Fibroblasts,Dcn;Col1a2;Slc6a13

@@ -10,7 +10,7 @@ multiqc_mode: "interactive"      # interactive | flat
 cellranger_bin: "/rds/project/rds-O11U8YqSuCk/bioinformatics/tools/cellranger-10.1.0/cellranger"
 cellranger_ref: "/rds/project/rds-O11U8YqSuCk/bioinformatics/genome/index/cellranger/ensembl/mus_musculus/release-113/mus_musculus_GRCm39_113"
 cellranger_chemistry: "auto"     # auto | SC3Pv3 | SC3Pv4 | SC5P-R2 | ...
-cellranger_create_bam: true      # BAM needed for velocity / genotype demultiplexing; false saves space
+cellranger_create_bam: false     # BAM needed for velocity / genotype demultiplexing; false saves space
 cellranger_include_introns: true # Cell Ranger default; keep true for single-nucleus
 cellranger_expect_cells: ""      # optional integer, empty = auto
 
@@ -21,3 +21,34 @@ expected_cells: ""                   # plot only: dashed line on Estimated Numbe
 
 # Gene annotation (mouse, Ensembl 113 - same release as cellranger_ref)
 annotation: "/rds/project/rds-O11U8YqSuCk/bioinformatics/genome/ensembl/mus_musculus/release-113/gene_annotation.tsv"   # ensembl_gene_id + gene_symbol, for sex_check
+
+# -----------------------------
+# Downstream single-cell analysis (sc_* rules)
+# -----------------------------
+# Test data: 10x "1k Brain Cells from an E18 Mouse" (neuron_1k_v3), split by cell barcode into
+# 4 pseudo-samples (test_data/README_test_data.txt); metadata groups are fake.
+sc_downstream: true
+sc_analysis: "downstream_analysis"     # results_raw/<sc_analysis>/
+sc_markers: "resources/markers_mouse_embryonic_brain.csv"  # test data is E18 brain; markers_mouse_brain.csv for adult
+sc_threads: 16
+sc_mem: 32                             # GB for sc_cluster / sc_annotate (must fit in the job's memory)
+sc_min_genes: 300
+sc_max_genes: 10000
+sc_min_counts: 500
+sc_max_pct_mito: 5
+sc_doublets: true
+sc_n_hvg: 3000
+sc_n_pcs: 30
+sc_batch_key: "sample"                 # Harmony integration key ('none' = no integration)
+sc_resolutions: "0.2,0.5,1.0"
+sc_cluster_resolution: 0.5
+sc_plot_cols: "Condition 1,Sample sex,Batch"
+sc_group_cols: "Condition 1"           # DESeq2 Group = these columns joined; comparisons use its levels
+sc_min_cells_pseudobulk: 10
+sc_dge_celltypes: "Excitatory_neurons,Inhibitory_neurons"
+sc_dge_comparisons:
+  treated_vs_untreated: "untreated"
+lfc_threshold: 1.0
+padj_threshold: 0.05
+pathway_organism: "mouse"
+pathway_databases: "GO,KEGG,REACTOME"

@@ -6,10 +6,9 @@
 #
 # Outputs (in --outdir):
 #   qc_metrics.csv            one row per sample: metadata + QC metrics
-#   barplot_qc_<column>.png   one figure per metadata column in --group_cols
 #   qc_metrics_per_lane.csv   one row per FASTQ pair: sequencing run, lane + QC metrics
 #   barplot_qc_run_lane.png   per-lane values coloured by run + lane, beside the --group_cols of each sample
-#   stripplot_qc_groups.png   read pairs and R2 % GC across each column in --group_cols
+#   stripplot_qc_groups.png   all metrics, R1 and R2 side by side, across each column in --group_cols
 
 suppressPackageStartupMessages({
     library(optparse)
@@ -17,6 +16,7 @@ suppressPackageStartupMessages({
     library(dplyr)
     library(tidyr)
     library(patchwork)
+    library(ggrepel)
 })
 
 # ---------------------------------------------------------
@@ -260,71 +260,6 @@ if ("Sample name" %in% colnames(merged)) {
 
 okabe_ito <- c("#0072B2", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#D55E00", "#F0E442", "#999999")
 
-plot_group <- function(group_col) {
-    values <- merged[[group_col]]
-    values[is.na(values) | values == ""] <- "Unknown"
-
-    # Numeric columns such as Batch: 1, 2, ... 10 rather than 1, 10, 2
-    known <- setdiff(unique(values), "Unknown")
-    levels_group <- if (all(!is.na(suppressWarnings(as.numeric(known))))) {
-        known[order(as.numeric(known))]
-    } else {
-        sort(known)
-    }
-    if ("Unknown" %in% values) {
-        levels_group <- c(levels_group, "Unknown")
-    }
-
-    colours <- if (length(levels_group) <= length(okabe_ito)) {
-        okabe_ito[seq_along(levels_group)]
-    } else {
-        hcl.colors(length(levels_group), "Dynamic")
-    }
-    names(colours) <- levels_group
-
-    # Samples ordered by group, then by depth; first sample on top
-    plot_df <- merged %>%
-        mutate(group = factor(values, levels = levels_group)) %>%
-        arrange(group, desc(`Read pairs (M)`))
-    plot_df$label <- factor(plot_df$label, levels = rev(plot_df$label))
-
-    long <- plot_df %>%
-        select(label, group, all_of(metrics)) %>%
-        pivot_longer(all_of(metrics), names_to = "metric", values_to = "value") %>%
-        filter(!is.na(value)) %>%
-        mutate(metric = factor(metric, levels = metrics))
-
-    n_panels <- length(unique(long$metric))
-    n_rows <- ceiling(n_panels / 4)
-
-    p <- ggplot(long, aes(x = value, y = label, fill = group)) +
-        geom_col(width = 0.8) +
-        facet_wrap(~metric, ncol = 4, scales = "free_x") +
-        scale_fill_manual(values = colours, name = group_col) +
-        labs(x = NULL, y = NULL, title = paste0("FastQC metrics per sample, by ", group_col)) +
-        theme_bw(base_size = 10) +
-        theme(
-            panel.grid.major.y = element_blank(),
-            panel.grid.minor = element_blank(),
-            axis.text.y = element_text(size = 7),
-            strip.background = element_rect(fill = "grey95", colour = NA),
-            legend.position = "top"
-        )
-
-    output <- file.path(opt$outdir, paste0("barplot_qc_", gsub(" ", "_", group_col), ".png"))
-    ggsave(
-        output,
-        p,
-        width = 14,
-        height = max(5, n_rows * (nrow(plot_df) * 0.16 + 1) + 1),
-        dpi = 200,
-        limitsize = FALSE
-    )
-    cat("Saved: ", output, "\n", sep = "")
-}
-
-invisible(lapply(group_cols, plot_group))
-
 # ---------------------------------------------------------
 # Per FASTQ pair: sequencing run and lane
 # ---------------------------------------------------------
@@ -376,6 +311,14 @@ mix <- function(colour, with, amount) {
     colorRampPalette(c(colour, with))(101)[round(amount * 100) + 1]
 }
 
+# Far from the other samples: more than 3.5 median absolute deviations from the median
+is_outlier <- function(x) {
+    spread <- mad(x, na.rm = TRUE)
+    !is.na(x) & spread > 0 & abs(x - median(x, na.rm = TRUE)) / spread > 3.5
+}
+
+outlier_colour <- "#D55E00"
+
 # Run = hue, lane = shade within the hue
 run_lane_keys <- per_lane %>%
     distinct(`Sequencing run`, Lane) %>%
@@ -398,19 +341,24 @@ run_lane_colours <- unlist(lapply(runs, function(run) {
 }))
 names(run_lane_colours) <- run_lane_keys$key
 
-# Read pairs add up across lanes -> stacked bars; other metrics -> one point per lane.
+# Read pairs add up across lanes -> stacked bars; other metrics -> mean over lanes + lane range.
 # Group columns are shown as labelled tiles next to each sample.
 plot_run_lane <- function() {
-    primary <- if ("Batch" %in% group_cols) "Batch" else group_cols[1]
-    order_df <- merged
-    order_df$primary <- if (length(group_cols) > 0) clean_group(order_df[[primary]]) else "All"
-    order_df$primary <- factor(order_df$primary, levels = level_order(order_df$primary))
-    order_df <- arrange(order_df, primary, desc(`Read pairs (M)`))
+    # Samples sorted by the --group_cols in the order given, then by read pairs (deepest first);
+    # lines separate the groups of the first two columns (e.g. condition x sex)
+    sort_keys <- lapply(group_cols, function(group_col) {
+        values <- clean_group(merged[[group_col]])
+        as.integer(factor(values, levels = level_order(values)))
+    })
+    order_df <- merged[do.call(order, c(sort_keys, list(-merged$`Read pairs (M)`))), ]
     sample_levels <- rev(order_df$label)
 
-    # Lines between the groups of the sorting column
-    group_ends <- cumsum(rle(as.character(order_df$primary))$lengths)
-    separators <- nrow(order_df) - group_ends[-length(group_ends)] + 0.5
+    separators <- numeric(0)
+    if (length(group_cols) > 0) {
+        block <- do.call(paste, c(lapply(head(group_cols, 2), function(group_col) clean_group(order_df[[group_col]])), sep = " | "))
+        block_ends <- cumsum(rle(block)$lengths)
+        separators <- nrow(order_df) - block_ends[-length(block_ends)] + 0.5
+    }
 
     panels <- c("Read pairs (M)", "R2 % GC", "R2 % unique reads", "R2 max % adapter")
     long <- per_lane %>%
@@ -425,8 +373,32 @@ plot_run_lane <- function() {
         filter(!is.na(value)) %>%
         mutate(metric = factor(metric, levels = panels))
 
+    # Other metrics: one bar per sample = read-weighted mean over all runs and lanes,
+    # line = lowest to highest lane, outlier samples coloured and labelled
+    lane_panels <- setdiff(panels, "Read pairs (M)")
+    lane_summary <- per_lane %>%
+        left_join(select(merged, sample, label), by = "sample") %>%
+        select(label, weight = `Read pairs (M)`, all_of(lane_panels)) %>%
+        pivot_longer(all_of(lane_panels), names_to = "metric", values_to = "value") %>%
+        filter(!is.na(value)) %>%
+        group_by(label, metric) %>%
+        summarise(
+            mean = weighted.mean(value, weight),
+            low = min(value),
+            high = max(value),
+            .groups = "drop"
+        ) %>%
+        group_by(metric) %>%
+        mutate(outlier = is_outlier(mean), median = median(mean)) %>%
+        ungroup() %>%
+        mutate(
+            label = factor(label, levels = sample_levels),
+            metric = factor(metric, levels = panels)
+        )
+    medians <- distinct(lane_summary, metric, median)
+
     main <- ggplot(mapping = aes(x = value, y = label)) +
-        geom_hline(yintercept = separators, colour = "grey75", linewidth = 0.3) +
+        geom_hline(yintercept = separators, colour = "grey45", linewidth = 0.4) +
         geom_col(
             data = filter(long, metric == "Read pairs (M)"),
             aes(fill = key),
@@ -434,16 +406,36 @@ plot_run_lane <- function() {
             colour = "white",
             linewidth = 0.15
         ) +
-        geom_point(
-            data = filter(long, metric != "Read pairs (M)"),
-            aes(colour = key),
-            size = 1.3,
-            position = position_jitter(width = 0, height = 0.22, seed = 1)
+        geom_col(
+            data = lane_summary,
+            aes(x = mean),
+            fill = "grey72",
+            width = 0.75
+        ) +
+        geom_col(
+            data = filter(lane_summary, outlier),
+            aes(x = mean),
+            fill = outlier_colour,
+            width = 0.75
+        ) +
+        geom_vline(data = medians, aes(xintercept = median), linetype = "dashed", colour = "grey35", linewidth = 0.35) +
+        geom_linerange(
+            data = lane_summary,
+            aes(x = mean, xmin = low, xmax = high),
+            colour = "grey15",
+            linewidth = 0.45
+        ) +
+        geom_text(
+            data = filter(lane_summary, outlier),
+            aes(x = high, label = sprintf("%.1f", mean)),
+            hjust = -0.2,
+            size = 2.4,
+            colour = "grey15"
         ) +
         facet_wrap(~metric, nrow = 1, scales = "free_x") +
+        scale_x_continuous(expand = expansion(mult = c(0, 0.16))) +
         scale_y_discrete(limits = sample_levels) +
         scale_fill_manual(values = run_lane_colours, name = "Run and lane", drop = FALSE) +
-        scale_colour_manual(values = run_lane_colours, guide = "none", drop = FALSE) +
         guides(fill = guide_legend(nrow = 2, byrow = TRUE)) +
         labs(x = NULL, y = NULL) +
         theme_bw(base_size = 10) +
@@ -472,14 +464,16 @@ plot_run_lane <- function() {
         )
     }))
 
-    title <- "FastQC metrics per lane: each sample with its sequencing runs, lanes and groups"
+    title <- paste0("FastQC metrics per sample, sorted by ", paste(c(group_cols, "read pairs"), collapse = ", "))
+    subtitle <- "Read pairs split by sequencing run and lane; other metrics averaged across runs and lanes"
+    caption <- "Grey bar: read-weighted mean over all runs and lanes; black line: lowest to highest lane; dashed line: median of all samples; orange-red bar + value: more than 3.5 MADs from the median"
 
     figure <- if (nrow(tiles) > 0) {
         tiles$column <- factor(tiles$column, levels = group_cols)
         tile_plot <- ggplot(tiles, aes(x = column, y = label)) +
             geom_tile(aes(fill = fill), colour = "white", linewidth = 0.4) +
             geom_text(aes(label = value), size = 2.2, colour = "grey15") +
-            geom_hline(yintercept = separators, colour = "grey75", linewidth = 0.3) +
+            geom_hline(yintercept = separators, colour = "grey45", linewidth = 0.4) +
             scale_fill_identity() +
             scale_x_discrete(position = "top", expand = c(0, 0)) +
             scale_y_discrete(limits = sample_levels, expand = c(0, 0.6)) +
@@ -491,9 +485,9 @@ plot_run_lane <- function() {
                 axis.text.x = element_text(size = 8)
             )
         tile_plot + main + plot_layout(widths = c(length(group_cols) * 0.9, 9)) +
-            plot_annotation(title = title)
+            plot_annotation(title = title, subtitle = subtitle, caption = caption)
     } else {
-        main + plot_annotation(title = title)
+        main + plot_annotation(title = title, subtitle = subtitle, caption = caption)
     }
 
     output <- file.path(opt$outdir, "barplot_qc_run_lane.png")
@@ -508,75 +502,126 @@ plot_run_lane <- function() {
     cat("Saved: ", output, "\n", sep = "")
 }
 
-# One point per sample; line = group median; samples far from the rest are named
+# All FastQC metrics across each group column: one point per sample, R1 and R2 side by side,
+# line = median per group and read, samples far from the rest are named
 plot_groups <- function() {
-    panels <- c("Read pairs (M)", "R2 % GC")
-    all_levels <- unique(unlist(lapply(group_cols, function(column) {
-        level_order(clean_group(merged[[column]]))
+    read_metrics <- c("% GC", "% unique reads", "% overrepresented", "max % adapter", "lowest mean Q")
+    panels <- c("Read pairs (M)", read_metrics)
+    read_names <- c(R1 = "R1 (barcode + UMI)", R2 = "R2 (cDNA)")
+    read_colours <- c("R1 (barcode + UMI)" = "#0072B2", "R2 (cDNA)" = "#E69F00", "Read pair" = "grey35")
+
+    per_sample <- bind_rows(
+        transmute(merged, sample, metric = "Read pairs (M)", read = "Read pair", value = `Read pairs (M)`),
+        bind_rows(lapply(read_metrics, function(metric_name) {
+            bind_rows(lapply(names(read_names), function(read_id) {
+                source_col <- paste(read_id, metric_name)
+                if (!source_col %in% colnames(merged)) {
+                    return(NULL)
+                }
+                transmute(merged, sample, metric = metric_name, read = read_names[[read_id]], value = .data[[source_col]])
+            }))
+        }))
+    ) %>%
+        filter(!is.na(value)) %>%
+        group_by(metric, read) %>%
+        mutate(far = is_outlier(value)) %>%
+        ungroup()
+
+    all_levels <- unique(unlist(lapply(group_cols, function(group_col) {
+        level_order(clean_group(merged[[group_col]]))
     })))
 
-    long <- bind_rows(lapply(group_cols, function(column) {
-        merged %>%
-            transmute(sample, column = column, level = clean_group(.data[[column]]), across(all_of(panels)))
+    long <- bind_rows(lapply(group_cols, function(group_col) {
+        groups <- data.frame(sample = merged$sample, level = clean_group(merged[[group_col]]))
+        per_sample %>%
+            left_join(groups, by = "sample") %>%
+            mutate(column = group_col)
     })) %>%
-        pivot_longer(all_of(panels), names_to = "metric", values_to = "value") %>%
-        filter(!is.na(value)) %>%
         mutate(
             level = factor(level, levels = all_levels),
             column = factor(column, levels = group_cols),
-            metric = factor(metric, levels = panels)
-        ) %>%
-        group_by(metric) %>%
-        mutate(
-            spread = mad(value),
-            far = spread > 0 & abs(value - median(value)) / spread > 3.5
-        ) %>%
-        ungroup()
+            metric = factor(metric, levels = panels),
+            read = factor(read, levels = names(read_colours))
+        )
 
     tests <- long %>%
-        group_by(column, metric) %>%
-        filter(n_distinct(level) > 1) %>%
+        group_by(column, metric, read) %>%
+        filter(n_distinct(level) > 1, n_distinct(value) > 1) %>%
         summarise(p = kruskal.test(value ~ droplevels(level))$p.value, .groups = "drop") %>%
-        mutate(text = paste0("Kruskal-Wallis p = ", signif(p, 2)))
+        mutate(prefix = ifelse(read == "Read pair", "", paste0(sub(" .*", "", as.character(read)), " "))) %>%
+        group_by(column, metric) %>%
+        summarise(text = paste0(prefix, "p = ", signif(p, 2), collapse = "   "), .groups = "drop")
 
-    figure <- ggplot(long, aes(x = level, y = value)) +
+    dodge <- position_dodge(width = 0.7)
+
+    figure <- ggplot(long, aes(x = level, y = value, colour = read)) +
         geom_point(
-            colour = "grey35",
-            size = 1.6,
-            alpha = 0.75,
-            position = position_jitter(width = 0.14, height = 0, seed = 1)
+            size = 1.5,
+            alpha = 0.8,
+            position = position_jitterdodge(jitter.width = 0.12, jitter.height = 0, dodge.width = 0.7, seed = 1)
         ) +
-        stat_summary(fun = median, fun.min = median, fun.max = median, geom = "crossbar", width = 0.55, linewidth = 0.3) +
-        geom_text(
+        stat_summary(
+            aes(group = read),
+            fun = median,
+            fun.min = median,
+            fun.max = median,
+            geom = "crossbar",
+            width = 0.32,
+            linewidth = 0.35,
+            position = dodge,
+            show.legend = FALSE
+        ) +
+        geom_text_repel(
             data = filter(long, far),
-            aes(label = sample),
-            hjust = 0,
-            position = position_nudge(x = 0.2),
-            size = 2.3,
-            colour = "grey15"
+            aes(label = sample, group = read),
+            position = dodge,
+            size = 2.1,
+            colour = "grey15",
+            box.padding = 0.35,
+            min.segment.length = 0,
+            segment.size = 0.2,
+            segment.colour = "grey50",
+            max.overlaps = Inf,
+            seed = 1,
+            show.legend = FALSE
         ) +
         geom_text(
             data = tests,
             aes(x = -Inf, y = Inf, label = text),
-            hjust = -0.05,
-            vjust = 1.5,
-            size = 2.6,
+            inherit.aes = FALSE,
+            hjust = -0.04,
+            vjust = 1.4,
+            size = 2.4,
             colour = "grey30"
         ) +
         facet_grid(metric ~ column, scales = "free", space = "free_x", switch = "y") +
-        scale_x_discrete(expand = expansion(add = 0.8)) +
-        scale_y_continuous(expand = expansion(mult = c(0.05, 0.15))) +
-        labs(x = NULL, y = NULL, title = "Read pairs and R2 GC across sample groups") +
+        scale_colour_manual(values = read_colours, name = NULL) +
+        scale_x_discrete(expand = expansion(add = 0.7)) +
+        scale_y_continuous(expand = expansion(mult = c(0.14, 0.22))) +
+        guides(colour = guide_legend(override.aes = list(size = 3, alpha = 1))) +
+        labs(
+            x = NULL,
+            y = NULL,
+            title = "FastQC metrics across sample groups: R1 and R2 side by side",
+            caption = paste0(
+                "Read pairs (M): sequenced fragments, each = one R1 read + one R2 read. ",
+                "One point per sample (all runs and lanes combined); line = median.\n",
+                "Named = more than 3.5 MADs from the median of all samples; Kruskal-Wallis p, unadjusted; ",
+                "no point = no FastQC value (e.g. no adapter found in R1)."
+            )
+        ) +
         theme_bw(base_size = 10) +
         theme(
             panel.grid.major.x = element_blank(),
             panel.grid.minor = element_blank(),
             strip.background = element_rect(fill = "grey95", colour = NA),
-            strip.placement = "outside"
+            strip.placement = "outside",
+            legend.position = "top",
+            plot.caption = element_text(hjust = 0)
         )
 
     output <- file.path(opt$outdir, "stripplot_qc_groups.png")
-    ggsave(output, figure, width = 14, height = 7, dpi = 200)
+    ggsave(output, figure, width = 14, height = 2.1 * length(unique(long$metric)) + 1.8, dpi = 200)
     cat("Saved: ", output, "\n", sep = "")
 }
 

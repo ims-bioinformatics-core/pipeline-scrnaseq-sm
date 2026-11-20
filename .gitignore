@@ -1,3 +1,13 @@
 **/.ipynb_checkpoints/
-**/submit_slurm.sh
 **/.snakemake/
+
+# SLURM job logs
+slurm-*.out
+
+# Test data FASTQs (downloaded / generated; see test_data/README_test_data.txt)
+test_data/download/
+test_data/fastq/
+
+# Pipeline outputs
+results_raw/
+scripts/__pycache__/

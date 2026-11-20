@@ -1,0 +1,11 @@
+cell_type,genes
+Radial_glia,Pax6;Sox2;Vim;Hes5;Fabp7;Slc1a3
+Intermediate_progenitors,Eomes;Neurog2;Btg2;Mfap4
+Excitatory_neurons,Neurod6;Neurod2;Tbr1;Satb2;Bcl11b;Sla
+Inhibitory_neurons,Gad1;Gad2;Dlx1;Dlx2;Dlx5;Slc32a1
+Cajal_Retzius,Reln;Calb2;Trp73;Lhx5
+OPC,Pdgfra;Olig2;Cspg4
+Microglia,Cx3cr1;P2ry12;Csf1r;C1qa
+Endothelial,Cldn5;Flt1;Pecam1
+Pericytes,Pdgfrb;Rgs5;Kcnj8
+Fibroblasts,Col1a2;Dcn;Lum

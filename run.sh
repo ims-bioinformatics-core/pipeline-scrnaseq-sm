@@ -10,8 +10,9 @@ CONFIG_FILE="$PIPELINE_DIR/config.yml"
 # Resources
 # ==========================
 # Everything is sized from the actual allocation, so only submit_slurm.sh needs editing.
-# nproc = CPUs really allocated (SLURM may add CPUs to cover --mem); memory from SLURM, in GB.
-CORES=$(nproc)
+# SLURM_CPUS_ON_NODE = CPUs really allocated (SLURM may add CPUs to cover --mem); memory from SLURM, in GB.
+# Not nproc: it follows OMP_NUM_THREADS, which login nodes set to 1 and sbatch passes on to the job.
+CORES="${SLURM_CPUS_ON_NODE:-$(nproc --all)}"
 if [ -n "${SLURM_MEM_PER_NODE:-}" ]; then
     TOTAL_MEM=$((SLURM_MEM_PER_NODE / 1024))
 elif [ -n "${SLURM_MEM_PER_CPU:-}" ]; then

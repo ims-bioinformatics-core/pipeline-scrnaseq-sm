@@ -3,13 +3,17 @@
 Single-cell RNA-seq (10x Genomics) pipeline in Snakemake, built the same way as `pipeline-bulkrnaseq-sm`
 (same `run.sh` / `config.yml` / `inputs/` / `scripts/` layout, same `filepaths.csv` and `metadata.csv`).
 
+![Pipeline overview](docs/pipeline_overview.svg)
+
+*Printable version: [docs/pipeline_overview.pdf](docs/pipeline_overview.pdf). Redraw with `python docs/make_overview.py docs/pipeline_overview.pdf` (and `.svg`).*
+
 ## Workflow
 
 | # | Rule | Tool | Env | Produces |
 |---|------|------|-----|----------|
 | 1 | `fastqc` | FastQC | `pipeline-bulkrnaseq-sm_env` | `fastq-raw/{sample}.r_{1,2}_fastqc.{html,zip}` |
 | 2 | `multiqc` | MultiQC | `pipeline-bulkrnaseq-sm_env` | `multiqc-raw/multiqc_report.html` |
-| 2b | `qc_check` | R (`plot_barplot_qc.R`) | `dge_env` | `qc_check/`: FastQC metrics per sample (lanes combined) + one barplot figure per metadata column in `qc_check_cat`; per-lane table + figure by sequencing run and lane; group comparison of read pairs and R2 % GC |
+| 2b | `qc_check` | R (`plot_barplot_qc.R`) | `dge_env` | `qc_check/`: FastQC metrics per sample (lanes combined) + per lane; per-sample figure by sequencing run and lane; all metrics (R1 and R2 side by side) across the `qc_check_cat` groups |
 | 3 | `cellranger_count` | Cell Ranger 10.1.0 | none (full path in `cellranger_bin`) | `cellranger/{sample}/outs/` |
 | 4 | `cellranger_check` | Python (`plot_cellranger_metrics.py`) | `pipeline-bulkrnaseq-sm_env` | `cellranger_check/`: merged metrics table + per-sample QC barplots, grouped by `cellranger_check_cat` |
 | 5 | `merge_counts` | Python (`make_pseudobulk.py`) | `pipeline-bulkrnaseq-sm_env` | `merged-counts/merged_counts.csv`: pseudobulk (UMIs summed over cells) gene x sample, same layout as bulk; `n_cells.csv` |
@@ -75,7 +79,7 @@ snakemake -s Snakefile -n --cores 96 --configfile config.yml \
 | `cellranger_create_bam` | `true` / `false` |
 | `cellranger_include_introns` | `true` (default) / `false` |
 | `cellranger_expect_cells` | Optional integer, empty = auto |
-| `qc_check_cat` | Comma-separated metadata columns for the FastQC plots, e.g. `Condition 1,Batch,Sample sex` (one figure each; empty = table only) |
+| `qc_check_cat` | Comma-separated metadata columns for the FastQC plots, e.g. `Condition 1,Batch,Sample sex` (columns of `stripplot_qc_groups.png` and tiles in `barplot_qc_run_lane.png`) |
 | `cellranger_check_cat` | Metadata column to group the Cell Ranger QC plots by (e.g. `Sample sex`; empty = no grouping) |
 | `annotation` | Gene annotation TSV (`ensembl_gene_id`, `gene_symbol`), same Ensembl release as `cellranger_ref`; used by `sex_check` |
 | `expected_cells` | Plot only: dashed line at this value on "Estimated Number of Cells" (empty = no line). Does not change Cell Ranger (use `cellranger_expect_cells` for that) |
@@ -88,10 +92,9 @@ results_raw/
 ├── multiqc-raw/multiqc_report.html
 ├── qc_check/
 │   ├── qc_metrics.csv             # one row per sample: metadata + FastQC metrics (lanes combined)
-│   ├── barplot_qc_<column>.png    # one figure per column in qc_check_cat
 │   ├── qc_metrics_per_lane.csv    # one row per FASTQ pair: sequencing run, lane + FastQC metrics
 │   ├── barplot_qc_run_lane.png    # per-lane values by run + lane (run = hue, lane = shade), with the qc_check_cat groups beside each sample
-│   └── stripplot_qc_groups.png    # read pairs and R2 % GC across each qc_check_cat column
+│   └── stripplot_qc_groups.png    # all FastQC metrics, R1 and R2 side by side, across each qc_check_cat column
 ├── cellranger/
 │   ├── fastq/<sample>/            # symlinks <sample>_S1_L00N_R{1,2}_001.fastq.gz (one lane per FASTQ pair) for Cell Ranger
 │   └── <sample>/outs/             # web_summary.html, metrics_summary.csv, *_feature_bc_matrix(.h5), BAM, cloupe
